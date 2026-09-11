@@ -124,15 +124,26 @@ final class SessionManager: @unchecked Sendable {
         }
     }
 
+    // The public payload getter and metadata workers can read concurrently. Keep this formatter
+    // behind its own short lock, never the session-array lock or the persistence queue.
+    private let dateFormattingLock = NSLock()
+    private let distinctDaysFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withFullDate]
+        return formatter
+    }()
+
     var distinctDaysUsedLastMonthCount: Int {
-        let dateFormatter = ISO8601DateFormatter()
-        dateFormatter.formatOptions = [.withFullDate]
+        distinctDaysUsedLastMonthCount(at: Date())
+    }
 
-        // Get date 30 days ago
-        let thirtyDaysAgoDate = Date().addingTimeInterval(-(30 * 24 * 60 * 60))
-        let thirtyDaysAgoFormatted = dateFormatter.string(from: thirtyDaysAgoDate)
-
-        return self.distinctDaysUsed.countISODatesOnOrAfter(cutoffISODate: thirtyDaysAgoFormatted)
+    func distinctDaysUsedLastMonthCount(at date: Date) -> Int {
+        // Preserve the existing UTC full-date cutoff and fixed thirty-day interval.
+        let thirtyDaysAgoDate = date.addingTimeInterval(-(30 * 24 * 60 * 60))
+        dateFormattingLock.lock()
+        let cutoff = distinctDaysFormatter.string(from: thirtyDaysAgoDate)
+        dateFormattingLock.unlock()
+        return self.distinctDaysUsed.countISODatesOnOrAfter(cutoffISODate: cutoff)
     }
 
     private var currentSessionStartedAt: Date = .distantPast

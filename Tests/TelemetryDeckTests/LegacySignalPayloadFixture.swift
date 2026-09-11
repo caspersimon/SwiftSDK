@@ -1,74 +1,13 @@
 import Foundation
 
-#if os(iOS)
-    import UIKit
-#elseif os(macOS)
-    import AppKit
-    import IOKit
-#elseif os(watchOS)
-    import WatchKit
-#elseif os(tvOS)
-    import TVUIKit
-#endif
+@testable import TelemetryDeck
 
-/// Note: only use this when posting to the deprecated V1 ingest API
-struct SignalPostBody: Codable, Equatable {
-    /// When was this signal generated
-    let receivedAt: Date
-
-    /// The App ID of this signal
-    let appID: String
-
-    /// A user identifier. This should be hashed on the client, and will be hashed + salted again
-    /// on the server to break any connection to personally identifiable data.
-    let clientUser: String
-
-    /// A randomly generated session identifier. Should be the same over the course of the session
-    let sessionID: String
-
-    /// A type name for this signal that describes the event that triggered the signal
-    let type: String
-
-    /// An optional numerical value to send along with the signal.
-    let floatValue: Double?
-
-    /// Tags in the form "key:value" to attach to the signal
-    let payload: [String: String]
-
-    /// If "true", mark the signal as a testing signal and only show it in a dedicated test mode UI
-    let isTestMode: String
-}
-
-/// The default payload that is included in payloads processed by TelemetryDeck.
-public struct DefaultSignalPayload: Encodable {
-    // Device model cannot change during the process. Swift initializes this once, lazily;
-    // the signal path first reads it on the metadata worker, never in its UI snapshot.
-    private static let cachedModelName = modelName
-
-    /// The complete default payload, including current UI and session metadata.
+// Frozen 2.14.2 payload builder (58f436299d3f6710bcedc18aff26480aaf1879fc).
+// This independent oracle guards all legacy/current keys and values when changing execution ownership.
+// Do not refactor it to use the new split metadata helpers.
+extension DefaultSignalPayload {
     @MainActor
-    public static var parameters: [String: String] {
-        backgroundParameters.applying(uiParameters)
-    }
-
-    /// Only platform UI reads belong on the main actor.
-    ///
-    /// Values are refreshed for every signal.
-    @MainActor
-    static var uiParameters: [String: String] {
-        let parameters: [String: String] = [
-            "TelemetryDeck.Device.orientation": Self.orientation,
-            "TelemetryDeck.Device.screenResolutionHeight": Self.screenResolutionHeight,
-            "TelemetryDeck.Device.screenResolutionWidth": Self.screenResolutionWidth,
-            "TelemetryDeck.Device.screenScaleFactor": Self.screenScaleFactor,
-            "TelemetryDeck.UserPreference.colorScheme": Self.colorScheme,
-            "TelemetryDeck.UserPreference.layoutDirection": Self.layoutDirection,
-        ]
-        return parameters.applying(Self.accessibilityParameters)
-    }
-
-    /// Called on the metadata worker by SignalManager; no UIKit/AppKit state is read here.
-    static var backgroundParameters: [String: String] {
+    static var legacyParameters: [String: String] {
         var parameters: [String: String] = [
             // deprecated names
             "platform": Self.platform,
@@ -81,7 +20,7 @@ public struct DefaultSignalPayload: Encodable {
             "isDebug": "\(Self.isDebug)",
             "isTestFlight": "\(Self.isTestFlight)",
             "isAppStore": "\(Self.isAppStore)",
-            "modelName": Self.cachedModelName,
+            "modelName": Self.modelName,
             "architecture": Self.architecture,
             "operatingSystem": Self.operatingSystem,
             "targetEnvironment": Self.targetEnvironment,
@@ -97,9 +36,13 @@ public struct DefaultSignalPayload: Encodable {
             "TelemetryDeck.AppInfo.versionAndBuildNumber": "\(Self.appVersion) (build \(Self.buildNumber))",
 
             "TelemetryDeck.Device.architecture": Self.architecture,
-            "TelemetryDeck.Device.modelName": Self.cachedModelName,
+            "TelemetryDeck.Device.modelName": Self.modelName,
             "TelemetryDeck.Device.operatingSystem": Self.operatingSystem,
+            "TelemetryDeck.Device.orientation": Self.orientation,
             "TelemetryDeck.Device.platform": Self.platform,
+            "TelemetryDeck.Device.screenResolutionHeight": Self.screenResolutionHeight,
+            "TelemetryDeck.Device.screenResolutionWidth": Self.screenResolutionWidth,
+            "TelemetryDeck.Device.screenScaleFactor": Self.screenScaleFactor,
             "TelemetryDeck.Device.systemMajorMinorVersion": Self.majorMinorSystemVersion,
             "TelemetryDeck.Device.systemMajorVersion": Self.majorSystemVersion,
             "TelemetryDeck.Device.systemVersion": Self.systemVersion,
@@ -117,10 +60,13 @@ public struct DefaultSignalPayload: Encodable {
             "TelemetryDeck.SDK.nameAndVersion": "SwiftSDK \(sdkVersion)",
             "TelemetryDeck.SDK.version": sdkVersion,
 
+            "TelemetryDeck.UserPreference.colorScheme": Self.colorScheme,
             "TelemetryDeck.UserPreference.language": Self.preferredLanguage,
+            "TelemetryDeck.UserPreference.layoutDirection": Self.layoutDirection,
             "TelemetryDeck.UserPreference.region": Self.region,
         ]
 
+        parameters.merge(self.accessibilityParameters, uniquingKeysWith: { $1 })
         parameters.merge(self.calendarParameters, uniquingKeysWith: { $1 })
 
         if let extensionIdentifier = Self.extensionIdentifier {
