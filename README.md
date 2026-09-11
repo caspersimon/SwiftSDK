@@ -150,3 +150,9 @@ The project includes a Makefile at the root with some useful commands:
 - `test`:  Run unit tests
 
 Before finalising your PR, please run `make lint`.
+
+## NotNow owned patch
+
+This branch retains upstream 2.14.2 with a narrow metadata execution repair.
+See [NOTNOW-PATCH.md](NOTNOW-PATCH.md) for provenance, behavior, regression tests,
+and the condition for returning to an upstream release.

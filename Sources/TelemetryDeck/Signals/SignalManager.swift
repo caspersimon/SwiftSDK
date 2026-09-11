@@ -26,6 +26,8 @@ protocol SignalManageable {
 final class SignalManager: SignalManageable, @unchecked Sendable {
     private let signalCache: SignalCache<SignalPostBody>
     let configuration: TelemetryManagerConfiguration
+    private let metadata: SignalMetadata
+    private let metadataQueue = DispatchQueue(label: "com.telemetrydeck.SignalMetadata", qos: .utility)
 
     private var sendTimerSource: DispatchSourceTimer?
     private let timerQueue = DispatchQueue(label: "com.telemetrydeck.SignalTimer", qos: .utility)
@@ -58,14 +60,31 @@ final class SignalManager: SignalManageable, @unchecked Sendable {
         /// Test-only accessor to push signals directly into the cache.
         var signalCacheForTesting: SignalCache<SignalPostBody> { signalCache }
 
+        /// Waits for already-submitted signals to cross both queues, without polling or blocking main.
+        @available(macOS 10.15, iOS 13, tvOS 13, watchOS 6, *)
+        func waitForPendingSignalsForTesting() async {
+            await withCheckedContinuation { continuation in
+                DispatchQueue.main.async {
+                    self.metadataQueue.async { continuation.resume() }
+                }
+            }
+        }
+
         var _shouldFailNextEncode: Bool = false
     #endif
 
-    init(configuration: TelemetryManagerConfiguration) {
+    init(
+        configuration: TelemetryManagerConfiguration,
+        metadata: SignalMetadata = .live,
+        signalCache: SignalCache<SignalPostBody>? = nil
+    ) {
         self.configuration = configuration
+        self.metadata = metadata
 
         // We automatically load any old signals from disk on initialisation
-        signalCache = SignalCache(logHandler: configuration.swiftUIPreviewMode ? nil : configuration.logHandler, cacheLimit: configuration.cacheLimit)
+        self.signalCache =
+            signalCache
+            ?? SignalCache(logHandler: configuration.swiftUIPreviewMode ? nil : configuration.logHandler, cacheLimit: configuration.cacheLimit)
 
         // Before the app terminates, we want to save any pending signals to disk
         // We need to monitor different notifications for different devices.
@@ -160,9 +179,10 @@ final class SignalManager: SignalManageable, @unchecked Sendable {
         // enqueue signal to sending cache
         DispatchQueue.main.async {
             let defaultUserIdentifier = self.defaultUserIdentifier
-            let defaultParameters = DefaultSignalPayload.parameters
+            let uiParameters = self.metadata.uiParameters()
 
-            DispatchQueue.global(qos: .utility).async {
+            self.metadataQueue.async {
+                let defaultParameters = self.metadata.backgroundParameters().applying(uiParameters)
                 let enrichedMetadata: [String: String] = configuration.metadataEnrichers
                     .map { $0.enrich(signalType: signalName, for: customUserID, floatValue: floatValue) }
                     .reduce([String: String]()) { $0.applying($1) }
